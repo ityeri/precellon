@@ -1,0 +1,10 @@
+[package]
+name = "precellon"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+scrollrs = { git = "https://github.com/ityeri/scrollrs.git", version = "0.1.0" }
+macroquad = "0.4.14"
+glam = "0.30.10"
+uuid = { version = "1", features = ["v4"] }
