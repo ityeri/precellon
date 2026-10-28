@@ -1,8 +1,8 @@
 use glam::Vec2;
 use std::hash::Hash;
 
-pub trait PointKey: Copy + Eq + Hash + Send + Sync {}
-impl<T: Copy + Hash + Eq + Send + Sync> PointKey for T {}
+pub trait PointKey: Copy + Eq + Ord + Hash + Send + Sync {}
+impl<T: Copy + Hash + Eq + Ord + Send + Sync> PointKey for T {}
 
 #[derive(Clone)]
 pub struct Point<K: PointKey> {

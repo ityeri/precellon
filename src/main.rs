@@ -27,6 +27,7 @@ fn window_conf() -> Conf {
         window_height: 500,
         fullscreen: false,
         window_resizable: true,
+        high_dpi: true,
         ..Default::default()
     }
 }
@@ -59,7 +60,7 @@ async fn main() {
             fixed_point_key,
             Point::new(fixed_point_key, Vec2::new(0.0, 0.0)),
         )]),
-        joints: HashSet::from([]),
+        joints: HashMap::from([]),
         kinematics: HashMap::from([(fixed_point_key, Vec2::ZERO)]),
         config: PhysicsConfig {
             stiffness: 1.0,
@@ -127,7 +128,7 @@ async fn main() {
                     .insert(target_point_key, unprojected_mouse_pos);
 
                 let joint = Joint::new(source_point_key, target_point_key, 0.0);
-                world.joints.insert(joint.clone());
+                world.joints.insert(joint.key, joint.clone());
 
                 Some(JointCreatingContext {
                     source_point_key,
@@ -157,7 +158,7 @@ async fn main() {
                         world.kinematics.remove(&context.target_point_key);
                         world.points.remove(&context.target_point_key);
                     }
-                    world.joints.remove(&context.joint);
+                    world.joints.remove(&context.joint.key);
 
                     let source_point_pos = world.points[&context.source_point_key].position;
                     let target_point_pos = world.points[&near_point_key].position;
@@ -165,15 +166,17 @@ async fn main() {
                     let new_context = JointCreatingContext {
                         source_point_key: context.source_point_key,
                         target_point_key: near_point_key,
-                        joint: Joint {
-                            point1: context.source_point_key,
-                            point2: near_point_key,
-                            length: source_point_pos.distance(target_point_pos),
-                        },
+                        joint: Joint::new(
+                            context.source_point_key,
+                            near_point_key,
+                            source_point_pos.distance(target_point_pos),
+                        ),
                         is_mounted: true,
                     };
 
-                    world.joints.insert(new_context.joint.clone());
+                    world
+                        .joints
+                        .insert(new_context.joint.key, new_context.joint.clone());
 
                     new_context
                 } else {
@@ -181,7 +184,7 @@ async fn main() {
                         .kinematics
                         .insert(context.target_point_key, unprojected_mouse_pos);
 
-                    if let Some(old_joint) = world.joints.take(&context.joint) {
+                    if let Some((key, old_joint)) = world.joints.remove_entry(&context.joint.key) {
                         let source_point_pos = world.points[&context.source_point_key].position;
                         let target_point_pos = world.points[&context.target_point_key].position;
 
@@ -194,7 +197,9 @@ async fn main() {
                             ..context
                         };
 
-                        world.joints.insert(new_context.joint.clone());
+                        world
+                            .joints
+                            .insert(new_context.joint.key, new_context.joint.clone());
 
                         new_context
                     } else {
@@ -251,9 +256,9 @@ async fn main() {
             draw_circle(projected_pos.x, projected_pos.y, 4.0, color::WHITE);
         });
 
-        world.joints.iter().for_each(|joint| {
-            let point1 = world.points.get(&joint.point1).unwrap();
-            let point2 = world.points.get(&joint.point2).unwrap();
+        world.joints.keys().for_each(|joint| {
+            let point1 = world.points.get(&joint.a).unwrap();
+            let point2 = world.points.get(&joint.b).unwrap();
             let projected_pos1 = adaptor.project(point1.position.as_dvec2()).as_vec2();
             let projected_pos2 = adaptor.project(point2.position.as_dvec2()).as_vec2();
 
@@ -268,9 +273,9 @@ async fn main() {
         });
 
         if is_running {
-            world = world.update(dt, 64);
+            world = world.update(dt, 128);
         } else {
-            world = world.kinematic_update(64);
+            world = world.kinematic_update();
         }
 
         next_frame().await
