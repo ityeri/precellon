@@ -1,4 +1,7 @@
-use std::hash::{Hash, Hasher};
+use std::{
+    array::IntoIter,
+    hash::{Hash, Hasher},
+};
 
 use super::point::PointKey;
 
@@ -14,6 +17,10 @@ impl<K: PointKey> JointKey<K> {
         } else {
             JointKey { a: b, b: a }
         }
+    }
+
+    pub fn iter(&self) -> IntoIter<&K, 2> {
+        [&self.a, &self.b].into_iter()
     }
 }
 impl<K: PointKey> Hash for JointKey<K> {

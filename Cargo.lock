@@ -436,7 +436,7 @@ checksum = "cf54715a573b99ac80df0bc206da022bcd442c974952c7b9720069370852e21f"
 [[package]]
 name = "scrollrs"
 version = "0.1.0"
-source = "git+https://github.com/ityeri/scrollrs.git#0ae6a52bf2f8e1e5d75b49b96498ddea93930c6c"
+source = "git+https://github.com/ityeri/scrollrs.git?rev=6e65cbc#6e65cbcc18ed669671f5b5d1b5e6ddb664fb2d49"
 dependencies = [
  "glam 0.30.10",
 ]
