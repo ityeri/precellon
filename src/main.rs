@@ -77,54 +77,59 @@ async fn main() {
     };
     let mut prev_mouse_pos: Vec2;
 
-    // let ground_size = 10
-    // let ground_point_keys = (0..ground_size).map(||)
-    // TODO
+    let ground_points = 10;
+    let ground_step_size = 1.0;
+    let ground_point_keys = (0..ground_points)
+        .map(|i| Uuid::new_v4())
+        .collect::<Vec<Uuid>>();
 
-    let mut world = World::<Uuid> {
-        points: HashMap::from([]),
-        joints: HashMap::from([]),
-        kinematics: HashMap::from([]),
-        config: PhysicsConfig {
-            stiffness: 1.0,
-            attenuation_force: 0.0001,
-            gravity_force: Vec2::new(0.0, -10.0),
-        },
+    let mut world = {
+        let initial_position =
+            Vec2::ZERO - vec2(ground_step_size * ground_points as f32, 0.0) / 2.0;
+
+        World::<Uuid> {
+            points: ground_point_keys
+                .iter()
+                .enumerate()
+                .map(|(i, &key)| {
+                    (
+                        key,
+                        Point::new(
+                            key,
+                            initial_position + vec2(ground_step_size * i as f32, 0.0),
+                        ),
+                    )
+                })
+                .collect(),
+            joints: (0..ground_point_keys.len() - 1)
+                .map(|i| {
+                    let joint = Joint::new(
+                        ground_point_keys[i],
+                        ground_point_keys[i + 1],
+                        ground_step_size,
+                    );
+                    (joint.key, joint)
+                })
+                .collect(),
+            kinematics: ground_point_keys
+                .iter()
+                .enumerate()
+                .map(|(i, &key)| {
+                    (
+                        key,
+                        initial_position + vec2(ground_step_size * i as f32, 0.0),
+                    )
+                })
+                .collect(),
+            config: PhysicsConfig {
+                stiffness: 1.0,
+                attenuation_force: 0.0001,
+                gravity_force: Vec2::new(0.0, -10.0),
+            },
+        }
     };
-    // let fixed_point_key1 = Uuid::new_v4();
-    // let fixed_point_key2 = Uuid::new_v4();
-    // let moving_point_key1 = Uuid::new_v4();
-    // let moving_joint_key1 = JointKey::new(fixed_point_key1, moving_point_key1);
-    // let moving_point_key2 = Uuid::new_v4();
-    // let moving_joint_key2 = JointKey::new(fixed_point_key2, moving_point_key2);
-    //
-    // let mut world = World::<Uuid> {
-    //     points: HashMap::from([
-    //         (fixed_point_key1, Point::new(fixed_point_key1, Vec2::ZERO)),
-    //         (fixed_point_key2, Point::new(fixed_point_key2, Vec2::ZERO)),
-    //         (moving_point_key1, Point::new(moving_point_key1, Vec2::ZERO)),
-    //         (moving_point_key2, Point::new(moving_point_key2, Vec2::ZERO)),
-    //     ]),
-    //     joints: HashMap::from([
-    //         (
-    //             moving_joint_key1,
-    //             Joint::new(fixed_point_key1, moving_point_key1, 1.0),
-    //         ),
-    //         (
-    //             moving_joint_key2,
-    //             Joint::new(fixed_point_key2, moving_point_key2, 1.0),
-    //         ),
-    //     ]),
-    //     kinematics: HashMap::new(),
-    //     config: PhysicsConfig {
-    //         stiffness: 1.0,
-    //         attenuation_force: 0.0001,
-    //         gravity_force: Vec2::new(0.0, -10.0),
-    //     },
-    // };
     let mut is_running = true;
 
-    // let mut controlling_point_key: Option<Uuid> = None;
     let mut structure_creating_context: Option<StructureCreatingContext<Uuid>> = None;
     let mut dragging_point_key: Option<Uuid> = None;
 
