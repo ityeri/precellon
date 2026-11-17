@@ -18,9 +18,10 @@ use physics::{
 };
 use scrollrs::Projector;
 use std::collections::{HashMap, HashSet};
+use std::ops::Index;
 use uuid::Uuid;
 
-use crate::physics::joint::JointKey;
+use crate::physics::joint::{self, JointKey};
 
 const POINT_SNAP_RADIUS: f32 = 10.0;
 
@@ -38,10 +39,15 @@ fn window_conf() -> Conf {
 
 #[derive(Clone)]
 struct StructureCreatingContext<K: PointKey> {
-    tail_point_keys: Vec<K>,
-    head_point_key: K,
+    tail_points: Vec<PointCreatingContext<K>>,
+    head_point: PointCreatingContext<K>,
     head_joint_key: JointKey<K>,
     attach_info: Option<AttachInfo>,
+}
+#[derive(Clone)]
+struct PointCreatingContext<K: PointKey> {
+    point_key: K,
+    original_point_kinematic: bool,
 }
 #[derive(Clone)]
 struct AttachInfo {
@@ -61,7 +67,7 @@ async fn main() {
 
     let mut adapter = scrollrs::ScrollAdapter::new(0.0, 0.0, None, None, None);
     adapter = adapter.set_zoom(0.5);
-    let wheel_sensitivity = 0.03;
+    let wheel_sensitivity = 0.2;
 
     let mut simulation_time_elapsed = 0.0f32;
 
@@ -144,9 +150,13 @@ async fn main() {
         if is_mouse_button_pressed(MouseButton::Right) {
             structure_creating_context = match structure_creating_context {
                 Some(ctx) => {
-                    world.kinematics.remove(&ctx.head_point_key);
-                    ctx.tail_point_keys.iter().for_each(|key| {
-                        world.kinematics.remove(&key);
+                    if !ctx.head_point.original_point_kinematic {
+                        world.kinematics.remove(&ctx.head_point.point_key);
+                    }
+                    ctx.tail_points.iter().for_each(|point_ctx| {
+                        if !point_ctx.original_point_kinematic {
+                            world.kinematics.remove(&point_ctx.point_key);
+                        }
                     });
 
                     None
@@ -162,24 +172,42 @@ async fn main() {
                                 < POINT_SNAP_RADIUS as f64
                         })
                         .next();
-                    let (source_point, is_attached) = if let Some(nerby_point) = nerby_point {
-                        (nerby_point.clone(), true)
+                    println!("{}", !nerby_point.is_none());
+
+                    let (source_point, is_attached, is_kinematic) =
+                        if let Some(nerby_point) = nerby_point {
+                            (
+                                nerby_point.clone(),
+                                true,
+                                world.kinematics.contains_key(&nerby_point.key),
+                            )
+                        } else {
+                            let new_point = Point::new(Uuid::new_v4(), world_mouse_pos);
+                            world.points.insert(new_point.key, new_point.clone());
+                            world.kinematics.insert(new_point.key, world_mouse_pos);
+                            (new_point, false, false)
+                        };
+
+                    let dest_point = if is_attached {
+                        source_point.clone()
                     } else {
-                        (Point::new(Uuid::new_v4(), world_mouse_pos), false)
+                        let new_point = Point::new(Uuid::new_v4(), vec2(1.0, 1.0));
+                        world.points.insert(new_point.key, new_point.clone());
+                        new_point
                     };
-                    let dest_point = Point::new(Uuid::new_v4(), world_mouse_pos);
                     let joint = Joint::new(source_point.key, dest_point.key, 0.0);
 
-                    world.points.insert(source_point.key, source_point.clone());
-                    world.points.insert(dest_point.key, dest_point.clone());
                     world.joints.insert(joint.key, joint.clone());
-                    if !is_attached {
-                        world.kinematics.insert(source_point.key, world_mouse_pos);
-                    }
 
                     Some(StructureCreatingContext {
-                        tail_point_keys: vec![source_point.key],
-                        head_point_key: dest_point.key,
+                        tail_points: vec![PointCreatingContext {
+                            point_key: source_point.key,
+                            original_point_kinematic: is_kinematic,
+                        }],
+                        head_point: PointCreatingContext {
+                            point_key: dest_point.key,
+                            original_point_kinematic: false,
+                        },
                         head_joint_key: joint.key,
                         attach_info: if is_attached {
                             Some(AttachInfo::non_dependent())
@@ -194,19 +222,23 @@ async fn main() {
             match structure_creating_context {
                 Some(ctx) => {
                     let new_point_key = Uuid::new_v4();
-                    let joint = Joint::new(ctx.head_point_key, new_point_key, 0.0);
+                    let joint = Joint::new(ctx.head_point.point_key, new_point_key, 0.0);
                     world
                         .points
                         .insert(new_point_key, Point::new(new_point_key, world_mouse_pos));
                     world.joints.insert(joint.key, joint.clone());
                     if ctx.attach_info.is_none() {
-                        world.kinematics.insert(ctx.head_point_key, world_mouse_pos);
+                        world
+                            .kinematics
+                            .insert(ctx.head_point.point_key, world_mouse_pos);
                     }
 
                     structure_creating_context = Some(StructureCreatingContext {
-                        tail_point_keys: [ctx.tail_point_keys.as_slice(), &[ctx.head_point_key]]
-                            .concat(),
-                        head_point_key: new_point_key,
+                        tail_points: [ctx.tail_points.as_slice(), &[ctx.head_point]].concat(),
+                        head_point: PointCreatingContext {
+                            point_key: new_point_key,
+                            original_point_kinematic: false,
+                        },
                         head_joint_key: joint.key,
                         attach_info: None,
                     })
@@ -265,7 +297,7 @@ async fn main() {
         structure_creating_context = match structure_creating_context {
             Some(ctx) => Some(match ctx.attach_info.as_ref() {
                 Some(attach_info) => {
-                    let attached_point = world.points[&ctx.head_point_key].clone();
+                    let attached_point = world.points[&ctx.head_point.point_key].clone();
 
                     if adapter
                         .project(attached_point.position.as_dvec2())
@@ -278,12 +310,12 @@ async fn main() {
                             world.joints.remove(&ctx.head_joint_key);
                         }
 
-                        let source_point_key = ctx.tail_point_keys.last().unwrap().clone();
+                        let source_point_ctx = ctx.tail_points.last().unwrap().clone();
                         let new_point = Point::new(Uuid::new_v4(), world_mouse_pos);
                         let new_joint = Joint::new(
-                            source_point_key,
+                            source_point_ctx.point_key,
                             new_point.key,
-                            world.points[&source_point_key]
+                            world.points[&source_point_ctx.point_key]
                                 .position
                                 .distance(new_point.position),
                         );
@@ -291,8 +323,11 @@ async fn main() {
                         world.joints.insert(new_joint.key, new_joint.clone());
 
                         StructureCreatingContext {
-                            tail_point_keys: ctx.tail_point_keys,
-                            head_point_key: new_point.key,
+                            tail_points: ctx.tail_points,
+                            head_point: PointCreatingContext {
+                                point_key: new_point.key,
+                                original_point_kinematic: false,
+                            },
                             head_joint_key: new_joint.key,
                             attach_info: None,
                         }
@@ -307,7 +342,7 @@ async fn main() {
                                 .project(point.position.as_dvec2())
                                 .distance(current_mouse_pos.as_dvec2())
                                 < POINT_SNAP_RADIUS as f64
-                                && point.key != ctx.head_point_key
+                                && point.key != ctx.head_point.point_key
                         })
                         .next();
 
@@ -316,13 +351,13 @@ async fn main() {
                             let nerby_point = nerby_point.clone();
 
                             world.joints.remove(&ctx.head_joint_key);
-                            world.points.remove(&ctx.head_point_key);
+                            world.points.remove(&ctx.head_point.point_key);
 
-                            let source_point_key = ctx.tail_point_keys.last().unwrap().clone();
+                            let source_point_ctx = ctx.tail_points.last().unwrap().clone();
                             let new_joint = Joint::new(
-                                source_point_key,
+                                source_point_ctx.point_key,
                                 nerby_point.key,
-                                world.points[&source_point_key]
+                                world.points[&source_point_ctx.point_key]
                                     .position
                                     .distance(nerby_point.position),
                             );
@@ -334,15 +369,23 @@ async fn main() {
                             };
 
                             StructureCreatingContext {
-                                tail_point_keys: ctx.tail_point_keys,
-                                head_point_key: nerby_point.key,
+                                tail_points: ctx.tail_points,
+                                head_point: PointCreatingContext {
+                                    point_key: nerby_point.key,
+                                    original_point_kinematic: world
+                                        .kinematics
+                                        .contains_key(&nerby_point.key),
+                                },
                                 head_joint_key: new_joint.key,
                                 attach_info: Some(AttachInfo { is_joint_dependent }),
                             }
                         }
                         None => {
-                            world.points.get_mut(&ctx.head_point_key).unwrap().position =
-                                world_mouse_pos;
+                            world
+                                .points
+                                .get_mut(&ctx.head_point.point_key)
+                                .unwrap()
+                                .position = world_mouse_pos;
 
                             let joint = world.joints[&ctx.head_joint_key].clone();
                             world.joints.get_mut(&ctx.head_joint_key).unwrap().length = world
@@ -360,14 +403,6 @@ async fn main() {
         if let Some(dragging_point_key) = dragging_point_key {
             world.kinematics.insert(dragging_point_key, world_mouse_pos);
         }
-
-        // world.kinematics.insert(fixed_point_key1, vec2(-2.0, 0.0));
-        // world.kinematics.insert(fixed_point_key2, vec2(0.0, 2.0));
-        //
-        // world.joints.get_mut(&moving_joint_key1).unwrap().length =
-        //     2.0 + (simulation_time_elapsed * 3.0).sin();
-        // world.joints.get_mut(&moving_joint_key2).unwrap().length =
-        //     2.0 + (simulation_time_elapsed * 3.0).cos();
 
         let (_wheel_x, wheel_y) = mouse_wheel();
         let zoom_amount = wheel_y as f64 * wheel_sensitivity;
